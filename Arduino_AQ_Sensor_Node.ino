@@ -47,23 +47,26 @@ unsigned int numberOfIdleCycles = 0;
 int messagesReceived = 0;
 
 //MessageCodes
-const char RequestData = 'R';
-const char BaseStationRequest = 'B';
-const char RequestPower = 'P';
-const char ReplyPower = 'L';
-const char ReplyData = 'D';
-const char SendingForwardingID = 'F';
-const char SendingReturnID = 'I';
-const char ResetNetwork = 'N';
-const char TestingConnection = 'T';
-const char CompletedBaseStationRequest = 'C';
-const char SynchronizeNeighbors = 'S';
-const char IncomingTimeMessage = '1';
-const char RequestTimeMessage = '2';
-const char TimeDifferenceOutgoingMessage = '3';
-const char DoneTimeSync = '4';
-const char FindAdjacentNodes = 'A';
-const char GenerateRoutingTable = 'G';
+const char RequestData = 'R'; //request the data of an individual node
+const char BaseStationRequest = 'B'; //request all data from the network
+const char RequestPower = 'P'; //request the power from the node
+const char ReplyPower = 'L'; //incoming power data (1byte data)
+const char ReplyData = 'D'; //variable length
+const char SendingForwardingID = 'F'; //1byte incoming
+const char SendingReturnID = 'I'; //16 char mac address to allow for base station
+const char ResetNetwork = 'N'; //reset the network data & states
+const char TestingConnection = 'T'; //test to see if the connection is valid (sleeping nodes sometimes miss the first char)
+const char CompletedBaseStationRequest = 'C'; //this branch of the network data request is completed
+const char SynchronizeNeighbors = 'S'; //synchronize the time of all your neighbors
+const char IncomingTimeMessage = '1'; //’the time is currently’
+const char RequestTimeMessage = '2'; //’please send me the time where you are’
+const char TimeDifferenceOutgoingMessage = '3'; //’the time between are clocks is’
+const char DoneTimeSync = '4'; //this branch of the network has had it’s time synchronized
+const char FindAdjacentNodes = 'A'; //search the nearby nodes
+const char GenerateRoutingTable = 'G'; //search the nearby nodes, but exclude the list of nodes variable byte
+const char IncomingListOfNodes = 'O'; //exclude all these from your list
+const char RequestCloseConnection = 'K'; //Because of android and it's stupid tunnels
+const char RequestFireYourLasers = 'E'; //Fires The Lasers
 const char FindYourMACAddress = 'M'; //remove after testing
 const char AssignYourName = 'Q'; //remove after testing
 const char FindName = '9'; //remove after testing
@@ -78,6 +81,8 @@ char state = IdleState;
 boolean retryNodeSearch = false;
 boolean hasReceivedBaseStationRequest = false;
 boolean hasSynchronizedBaseStation = false;
+boolean isLasersOn = false;
+boolean isNewRoutingTable = false;
 
 unsigned int cyclesOfIdle = 0;
 
@@ -94,24 +99,28 @@ int connectionAttempts = 0;
 byte retrySearchCount = 0;
 
 //Information on network structure
+const String NetworkNodeNamePrefix = "AQSN";
 String routingTable[] = {"00A","00A","00A","00A","00A"};
 int numberOfAdjacentNodes = 0;
 int numberOfAdjacentNodesContacted = 0;
 String adjacentNodes[] = {"00A","00A","00A","00A","00A"};
-const String NetworkNodeNamePrefix = "AQSN";
+byte alreadyFoundNodes[255];
+byte numberOfAlreadyFoundNodes = 0;
 
 // bluetooth serial
-int bluetoothTx = 2;  // TX-O pin of bluetooth mate, Arduino D2
+int bluetoothTx = 14;  // TX-O pin of bluetooth mate, Arduino D2
 int bluetoothRx = 5;  // RX-I pin of bluetooth mate, Arduino D3
 SoftwareSerial bluetooth(bluetoothTx, bluetoothRx);
 
 // color sensor
+
 int colorSensorTx = 4;  // TX-O pin of bluetooth mate, Arduino D2
 int colorSensorRx = 6;  // RX-I pin of bluetooth mate, Arduino D3
 SoftwareSerial colorSensor(colorSensorTx, colorSensorRx);
 
 
 //programming test cases
+int RXLED = 17;
 boolean SendStraightToSerial = false;
 
 //watch dog timer
@@ -124,6 +133,8 @@ void setup()
   Serial.begin(2400);  // Begin the serial monitor at 9600bps
   colorSensor.begin(38400);
   pinMode(16,OUTPUT);
+  pinMode(4,OUTPUT);
+  pinMode(3,OUTPUT);
   //serial and bluetooth interrupts (wakes up upon command)
   attachInterrupt(0,LowBatteryInterruptServiceRoutine,CHANGE);
   attachInterrupt(1,BluetoothInterruptServiceRoutine,CHANGE);
@@ -203,7 +214,7 @@ void ReceiveDataFromSerial()
       }
       else 
         {
-          colorSensor.print(messageFromSerial);
+          bluetooth.print(messageFromSerial);
           Serial.println("Direct: " +messageFromSerial);
       
         }
@@ -217,7 +228,7 @@ void ReceiveDataFromSerial()
     {
       if(SendStraightToSerial)
       {
-          colorSensor.print(messageFromSerial+'\r');
+          bluetooth.print(messageFromSerial+'\r');
           Serial.println("Direct: " +messageFromSerial);
           messageFromSerial = "";
       }
@@ -275,6 +286,8 @@ void enterSleep()
   numberOfIdleCycles = 0;
   attachInterrupt(0,LowBatteryInterruptServiceRoutine,CHANGE);
   attachInterrupt(1,BluetoothInterruptServiceRoutine,CHANGE);
+  digitalWrite(RXLED, HIGH);
+  TXLED0;
   Serial.println("sleeping");
   set_sleep_mode(SLEEP_MODE_PWR_SAVE);
   sleep_enable();
@@ -344,12 +357,24 @@ void ReceiveMessage(String message)
       {
         name.trim();
         if(name == "")
+        {
           retryNodeSearch = true;
+          Serial.println("Retry because of message: ");
+          delay(10);
+        }
         else if(name.substring(0,4) == NetworkNodeNamePrefix)
         {
+          byte contactedStationID = 0;
           Serial.println("Found neighbor: " + name);
-          adjacentNodes[numberOfAdjacentNodes] = _MAC;
-          numberOfAdjacentNodes++;
+          contactedStationID = byte(message.substring(4,7).toInt());
+          if(!contains(alreadyFoundNodes, contactedStationID, numberOfAlreadyFoundNodes))
+          {
+            adjacentNodes[numberOfAdjacentNodes] = _MAC;
+            alreadyFoundNodes[NumberOfAlreadyFoundNodes] = contactedStationID;
+            numberOfAdjacentNodes++;
+            NumberOfAlreadyFoundNodes++;
+            
+          }
         }
       }
       else if(message.substring(0,12)=="Inquiry Done")
@@ -366,6 +391,8 @@ void ReceiveMessage(String message)
         {
           retrySearchCount++;
           SearchForNodes();
+          retryNodeSearch = false;
+          numberOfAdjacentNodes = 0;
         }
       }
     break;
@@ -597,12 +624,26 @@ void HandleRequests(String message)
           break; 
           case FindAdjacentNodes:
             numberOfAdjacentNodes = 0;
-            //KillConnection();
+            KillConnection();
             retrySearchCount = 0;
             EnterCommandMode();
             SearchForNodes();
           break;
           case GenerateRoutingTable:
+            isNewRoutingTable =true;
+            numberOfAdjacentNodes = 0;
+            KillConnection();
+            retrySearchCount = 0;
+            EnterCommandMode();
+            SearchForNodes();
+          break;
+          case IncomingListOfNodes:
+            i++;
+            while(i< message.length())
+            {
+              AlreadyFoundNodes[NumberOfAlreadyFoundNodes] = (byte) message.charAt(i);
+              i++;
+            }
           break;
           case TestingConnection:
             Serial.println("this is the message that requested new mac address: " + message);
@@ -617,6 +658,20 @@ void HandleRequests(String message)
           break;
           case '.':
             return;
+          break;
+          case RequestCloseConnection: //only for the android
+          break;
+          case RequestFireYourLasers: // turn on the lasers
+            Serial.println("fire'n my lasers");
+            if(isLasersOn)
+            {
+              TurnOnPump();
+            }
+            else
+            {
+             TurnOffPump(); 
+            }
+            isLasersOn = !isLasersOn;
           break;
           default:
             //Serial.println("error parsing data");
@@ -638,6 +693,8 @@ boolean TrySplitSearchReplyIntoName(String message, String &_MAC, String &name, 
       if(IndexOfSecondComma > -1)
       {
         _MAC = message.substring(0,IndexOfFirstComma);
+        Serial.println("MAC: " + _MAC);
+        delay(10);
         name = message.substring(IndexOfFirstComma+1,IndexOfSecondComma);
         _ID = message.substring(IndexOfSecondComma+1);
         return true;
@@ -660,7 +717,9 @@ void ConnectToNode(String NameOfNode)
   ClearMessages(); // remove any remaining messages
   while(connectionAttempts < AcceptableNumberOfConnectionAttempts) // connect a given number of times
   {
+    Serial.println("Connect");
     Serial.println("Connecting to " + NameOfNode);
+    delay(10);
     bluetooth.println("C,"+NameOfNode);
     delay(5000);
     ClearMessages(); // remove any remaining messages
@@ -722,12 +781,15 @@ void FindOwnName()
 void SetBluetoothName()
 {
   EnterCommandMode();
-  Serial.println("Setting node name to: " + NetworkNodeNamePrefix);
-  bluetooth.println("SN," + NetworkNodeNamePrefix);
+  Serial.println("Setting node name to: " + NetworkNodeNamePrefix + GetThreeDigitStationID());
+  bluetooth.println("SN," + NetworkNodeNamePrefix + GetThreeDigitStationID());
   delay(100);
 }
 void KillConnection()
 {
+  bluetooth.print(RequestCloseConnection);
+  EndMessage();
+  delay(10);
   EnterCommandMode();
   bluetooth.println("K,");
   ExitCommandMode();
@@ -737,7 +799,7 @@ void EnterCommandMode()
   bluetooth.print("$");  // Print three times individually
   bluetooth.print("$");
   bluetooth.print("$");  // Enter command mode
-  delay(100);  // Short delay, wait for the Mate to send back CMD
+  delay(200);  // Short delay, wait for the Mate to send back CMD
 }
 void ExitCommandMode()
 {
@@ -830,4 +892,25 @@ void SetMillis(unsigned long new_millis){
   cli();
   timer0_millis = new_millis;
   SREG = oldSREG;
+}
+void TurnOnPump()
+{
+  digitalWrite(4,HIGH);
+  digitalWrite(3,HIGH);
+}
+void TurnOffPump()
+{
+  digitalWrite(4,LOW);
+  digitalWrite(3,LOW);
+}
+boolean contains(byte[] array, byte val, int length)
+{
+  for(int i = 0; i< length; i++)
+  {
+    if(array[i] == val)
+    {
+     return true;
+    } 
+  }
+  return false;
 }
