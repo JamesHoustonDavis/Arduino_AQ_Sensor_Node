@@ -10,9 +10,6 @@ The code runs on 3 interrupts, 2 for communication 1 for sleeping / data collect
 message can be sent with header test, request, information (as required), request...... \n (EOM). It is
 important that the communication not occur at the same time as a wakeup cycle.
 
-To setup the network you must first, from base station, request FindAdjacentNodes, then GenerateRoutingTable,
-then SynchronizeNeighbors, and finally ResetNetwork.
-
 */
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -25,8 +22,8 @@ then SynchronizeNeighbors, and finally ResetNetwork.
 const byte StationID = 2;
 const int lengthOfDataToSend = 100;
 const byte AcceptableNumberOfConnectionAttempts = 10; //
-const unsigned int NumberOfAcceptableIdleCyclesBeforeSleeping = 100000; //just random trial and error
-const unsigned long MilliSecondsToSleepBetweenDataCollectionCycles = 24000; //20 minutes = 12000000
+const unsigned int NumberOfAcceptableIdleCyclesBeforeSleeping = 10000000; //just random trial and error
+const unsigned long MilliSecondsToSleepBetweenDataCollectionCycles = 12000000; //20 minutes = 12000000
 
 //data
 byte data[lengthOfDataToSend];
@@ -130,6 +127,7 @@ int time = 0;
 
 void setup()
 {
+  delay(10000);
   Serial.begin(2400);  // Begin the serial monitor at 9600bps
   colorSensor.begin(38400);
   pinMode(16,OUTPUT);
@@ -178,11 +176,20 @@ void loop()
       f_wdt = 1;
     }
   }
-  if(millis()>sleepUntilTime) // if it's data collection time
+  if(millis()>sleepUntilTime)//time to turn on motor
+  {
+    TurnOnPump();
+  }
+  else
+  {
+    TurnOffPump();
+  }
+  if(millis()>sleepUntilTime+500) // if it's data collection time
   {
     Serial.println("data collected");
     colorSensor.println('R');
-    data[points] = analogRead(A0);
+    data[points] = pulseIn(10);
+    
     points++;
     points = points % lengthOfDataToSend;
     sleepUntilTime = points*MilliSecondsToSleepBetweenDataCollectionCycles-delayOfNodeToBaseStation;
@@ -367,13 +374,12 @@ void ReceiveMessage(String message)
           byte contactedStationID = 0;
           Serial.println("Found neighbor: " + name);
           contactedStationID = byte(message.substring(4,7).toInt());
-          if(!contains(alreadyFoundNodes, contactedStationID, numberOfAlreadyFoundNodes))
+          if(!ByteArrayContains(alreadyFoundNodes, contactedStationID, numberOfAlreadyFoundNodes))
           {
             adjacentNodes[numberOfAdjacentNodes] = _MAC;
-            alreadyFoundNodes[NumberOfAlreadyFoundNodes] = contactedStationID;
+            alreadyFoundNodes[numberOfAlreadyFoundNodes] = contactedStationID;
             numberOfAdjacentNodes++;
-            NumberOfAlreadyFoundNodes++;
-            
+            numberOfAlreadyFoundNodes++;
           }
         }
       }
@@ -390,6 +396,7 @@ void ReceiveMessage(String message)
         else
         {
           retrySearchCount++;
+          numberOfAlreadyFoundNodes -= numberOfAdjacentNodes; //erase the nodes you found :(
           SearchForNodes();
           retryNodeSearch = false;
           numberOfAdjacentNodes = 0;
@@ -641,7 +648,8 @@ void HandleRequests(String message)
             i++;
             while(i< message.length())
             {
-              AlreadyFoundNodes[NumberOfAlreadyFoundNodes] = (byte) message.charAt(i);
+              alreadyFoundNodes[numberOfAlreadyFoundNodes] = (byte) message.charAt(i);
+              numberOfAlreadyFoundNodes++;
               i++;
             }
           break;
@@ -903,7 +911,7 @@ void TurnOffPump()
   digitalWrite(4,LOW);
   digitalWrite(3,LOW);
 }
-boolean contains(byte[] array, byte val, int length)
+boolean ByteArrayContains(byte array[], byte val, int length)
 {
   for(int i = 0; i< length; i++)
   {
