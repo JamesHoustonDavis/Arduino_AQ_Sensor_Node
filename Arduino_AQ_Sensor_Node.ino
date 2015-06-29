@@ -109,12 +109,8 @@ int bluetoothTx = 14;  // TX-O pin of bluetooth mate, Arduino D2
 int bluetoothRx = 5;  // RX-I pin of bluetooth mate, Arduino D3
 SoftwareSerial bluetooth(bluetoothTx, bluetoothRx);
 
-// color sensor
-
-int colorSensorTx = 4;  // TX-O pin of bluetooth mate, Arduino D2
-int colorSensorRx = 6;  // RX-I pin of bluetooth mate, Arduino D3
-SoftwareSerial colorSensor(colorSensorTx, colorSensorRx);
-
+//sensor pins
+int tempPowerPin = 9; // control the power out to sensor
 
 //programming test cases
 int RXLED = 17;
@@ -129,10 +125,12 @@ void setup()
 {
   delay(10000);
   Serial.begin(2400);  // Begin the serial monitor at 9600bps
-  colorSensor.begin(38400);
+  //colorSensor.begin(38400);
   pinMode(16,OUTPUT);
   pinMode(4,OUTPUT);
   pinMode(3,OUTPUT);
+  pinMode(tempPowerPin,OUTPUT);
+  digitalWrite(tempPowerPin, LOW);
   //serial and bluetooth interrupts (wakes up upon command)
   attachInterrupt(0,LowBatteryInterruptServiceRoutine,CHANGE);
   attachInterrupt(1,BluetoothInterruptServiceRoutine,CHANGE);
@@ -187,8 +185,10 @@ void loop()
   if(millis()>sleepUntilTime+500) // if it's data collection time
   {
     Serial.println("data collected");
-    colorSensor.println('R');
-    data[points] = pulseIn(10);
+    digitalWrite(tempPowerPin, HIGH);
+    delay(5);
+    data[points] = analogRead(2);
+    digitalWrite(tempPowerPin, LOW);
     
     points++;
     points = points % lengthOfDataToSend;
@@ -251,6 +251,7 @@ void ReceiveDataFromSerial()
 
 void ReceiveDataFromBluetooth()
 {
+  delay(10);
   if(bluetooth.available())  // If the bluetooth sent any characters
   {
     reply = (char)bluetooth.read();
@@ -271,6 +272,7 @@ void ReceiveDataFromBluetooth()
 
 void ReceiveDataFromColorSensor()
 {
+  /*
   if(colorSensor.available())  // If the bluetooth sent any characters
   {
     reply = (char)colorSensor.read();
@@ -286,6 +288,7 @@ void ReceiveDataFromColorSensor()
     }
     numberOfIdleCycles = 0;
   }
+  */
 }
 
 void enterSleep()
@@ -294,7 +297,7 @@ void enterSleep()
   attachInterrupt(0,LowBatteryInterruptServiceRoutine,CHANGE);
   attachInterrupt(1,BluetoothInterruptServiceRoutine,CHANGE);
   digitalWrite(RXLED, HIGH);
-  TXLED0;
+  //TXLED0;
   Serial.println("sleeping");
   set_sleep_mode(SLEEP_MODE_PWR_SAVE);
   sleep_enable();
@@ -407,16 +410,16 @@ void ReceiveMessage(String message)
         state = IdleState;
     break;
     case WaitingForMACAddress:
-    if(message.length()>4)
-    {
-       MACAddress=message; 
-       Serial.println("Found MAC Address");
-       Serial.println(MACAddress);
-       state=IdleState;
-       ExitCommandMode();
-       EnterCommandMode();
-       SearchForNodes();
-    }
+      if(message.length()>4)
+      {
+         MACAddress=message; 
+         Serial.println("Found MAC Address");
+         Serial.println(MACAddress);
+         state=IdleState;
+         ExitCommandMode();
+         EnterCommandMode();
+         SearchForNodes();
+      }
     break;
     case IdleState://ready to accept commands / service connections
       if(!message.endsWith("."))   return;// all commands end with period
@@ -501,7 +504,7 @@ void HandleRequests(String message)
           case RequestPower:
             if(relayMessageTo==StationID) // if the request is directed to you
             {
-               power = (byte)analogRead(0);
+               power = (byte)analogRead(1);
                bluetooth.print(ReplyPower);
                bluetooth.print(power);
                EndMessage();
